@@ -7,6 +7,7 @@ import { Loader2, BookOpen, Zap, HelpCircle, ChevronDown, ChevronUp } from "luci
 
 type Flashcard = { id: string; question: string; answer: string };
 type Quiz = {
+  difficulty?: string;
   id: string;
   question: string;
   options: string[];

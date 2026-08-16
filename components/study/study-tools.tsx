@@ -232,7 +232,7 @@ export function StudyTools({
         )}
 
         {quizzes.map((q, qi) => {
-          const diffColor = q.difficulty === "easy"
+          const diffColor = (q as any).difficulty === "easy"
             ? "var(--green)"
             : q.difficulty === "hard"
             ? "var(--red)"

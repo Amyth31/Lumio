@@ -700,7 +700,7 @@ function NoteHistoryRow({
   menuOpen: boolean;
   editing: boolean;
   editValue: string;
-  editInputRef: React.RefObject<HTMLInputElement>;
+  editInputRef: React.RefObject<HTMLInputElement | null>;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onClick: () => void;

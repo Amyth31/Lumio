@@ -55,7 +55,7 @@ export default function QuizArenaPage() {
   const [startTime, setStartTime] = useState<number>(0);
   const [timeLeft, setTimeLeft] = useState(60);
   const [timesUp, setTimesUp] = useState<boolean[]>([]);
-  const timerRef = useRef<NodeJS.Timeout>();
+  const timerRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   useEffect(() => {
     if (state === "quiz" && timerEnabled && !submitted) {

@@ -26,7 +26,7 @@ export default function ChatHomePage() {
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<any>(null);
-  const searchTimeout = useRef<NodeJS.Timeout>();
+  const searchTimeout = useRef<NodeJS.Timeout | undefined>(undefined);
 
   useEffect(() => {
     const supabase = createClient();

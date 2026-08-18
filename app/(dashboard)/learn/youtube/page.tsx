@@ -45,9 +45,21 @@ const T = {
   green: "#4ade80",
 };
 
+function PanelToggleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+const MOBILE_BREAKPOINT = 768;
+
 export default function YouTubeNotesPage() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [fetchingNote, setFetchingNote] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Notes | null>(null);
@@ -62,6 +74,17 @@ export default function YouTubeNotesPage() {
 
   useEffect(() => { fetchHistory(); }, []);
   useEffect(() => { if (editingId) editInputRef.current?.focus(); }, [editingId]);
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+    setIsMobile(mql.matches);
+    setPanelOpen(!mql.matches);
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+      setPanelOpen(!e.matches);
+    };
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
 
   async function fetchHistory() {
     const res = await fetch("/api/youtube");
@@ -100,6 +123,7 @@ export default function YouTubeNotesPage() {
 
   async function handleHistoryClick(item: HistoryItem) {
     if (activeId === item.id) return;
+    if (isMobile) setPanelOpen(false);
     setFetchingNote(true);
     setError(null);
     setNotes(null);
@@ -180,7 +204,14 @@ export default function YouTubeNotesPage() {
   const unpinnedHistory = history.filter((h) => !h.is_pinned);
 
   return (
-    <div style={{ display: "flex", height: "100%", overflow: "hidden", background: T.bg }}>
+    <div style={{ display: "flex", height: "100%", overflow: "hidden", background: T.bg, position: "relative" }}>
+
+      {isMobile && panelOpen && (
+        <div
+          onClick={() => setPanelOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 40 }}
+        />
+      )}
 
       {/* Left panel */}
       <div style={{
@@ -190,6 +221,13 @@ export default function YouTubeNotesPage() {
         display: "flex",
         flexDirection: "column",
         background: T.bg,
+        ...(isMobile ? {
+          position: "fixed" as const,
+          top: 0, bottom: 0, left: 0,
+          zIndex: 50,
+          transform: panelOpen ? "translateX(0)" : "translateX(-100%)",
+          transition: "transform 0.25s ease",
+        } : {}),
       }}>
         <div style={{ padding: "24px 20px 16px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{
@@ -344,7 +382,18 @@ export default function YouTubeNotesPage() {
       </div>
 
       {/* Right panel */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "32px 40px" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "16px 18px" : "32px 40px" }}>
+        {isMobile && (
+          <button
+            onClick={() => setPanelOpen(true)}
+            style={{
+              width: "34px", height: "34px", borderRadius: "8px",
+              background: T.surface, border: `1px solid ${T.border}`, color: T.text,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              marginBottom: "16px",
+            }}
+          ><PanelToggleIcon /></button>
+        )}
         {!notes && !isLoading && (
           <div style={{
             display: "flex",

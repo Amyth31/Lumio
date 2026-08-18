@@ -50,7 +50,19 @@ const QUALITY_CONFIG: { key: Quality; label: string; color: string }[] = [
   { key: "easy", label: "Easy", color: T.green },
 ];
 
+function PanelToggleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+const MOBILE_BREAKPOINT = 768;
+
 export default function FlashcardsLearnPage() {
+  const [isMobile, setIsMobile] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [mode, setMode] = useState<Mode>("setup");
   const [sourceType, setSourceType] = useState<SourceType>("document");
   const [files, setFiles] = useState<File[]>([]);
@@ -77,6 +89,18 @@ export default function FlashcardsLearnPage() {
 
   useEffect(() => {
     loadBatches();
+  }, []);
+
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+    setIsMobile(mql.matches);
+    setPanelOpen(!mql.matches);
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+      setPanelOpen(!e.matches);
+    };
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
   }, []);
 
   async function loadBatches() {
@@ -136,6 +160,7 @@ export default function FlashcardsLearnPage() {
   }
 
   async function handleOpenBatch(batchId: string) {
+    if (isMobile) setPanelOpen(false);
     setError(null);
     setLoading(true);
     try {
@@ -207,6 +232,7 @@ export default function FlashcardsLearnPage() {
   }
 
   function resetToSetup() {
+    if (isMobile) setPanelOpen(false);
     setMode("setup");
     setFiles([]);
     setYoutubeUrl("");
@@ -291,9 +317,26 @@ export default function FlashcardsLearnPage() {
   };
 
   return (
-    <div style={styles.page}>
+    <div style={{ ...styles.page, position: "relative" }}>
+      {isMobile && panelOpen && (
+        <div
+          onClick={() => setPanelOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 40 }}
+        />
+      )}
+
       {/* Sidebar — history */}
-      <div style={styles.sidebar}>
+      <div style={{
+        ...styles.sidebar,
+        ...(isMobile ? {
+          position: "fixed" as const,
+          top: 0, bottom: 0, left: 0,
+          zIndex: 50,
+          background: T.bg,
+          transform: panelOpen ? "translateX(0)" : "translateX(-100%)",
+          transition: "transform 0.25s ease",
+        } : {}),
+      }}>
         <h2
           style={{
             fontFamily: "'Geist', sans-serif",
@@ -384,7 +427,18 @@ export default function FlashcardsLearnPage() {
       </div>
 
       {/* Main panel */}
-      <div style={styles.main}>
+      <div style={{ ...styles.main, position: "relative", padding: isMobile ? "20px 16px" : styles.main.padding }}>
+        {isMobile && (
+          <button
+            onClick={() => setPanelOpen(true)}
+            style={{
+              width: "34px", height: "34px", borderRadius: "8px",
+              background: T.surface, border: `1px solid ${T.border}`, color: T.text,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              position: "absolute", top: "16px", left: "16px",
+            }}
+          ><PanelToggleIcon /></button>
+        )}
         {mode === "setup" && (
           <div style={{ width: "100%", maxWidth: "480px" }}>
             <h1

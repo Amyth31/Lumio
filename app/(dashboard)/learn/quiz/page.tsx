@@ -2,25 +2,29 @@
 
 import { useState, useEffect, useRef } from "react";
 
-type Question = {
-  question: string;
-  options: string[];
-  correct: string;
-  explanation: string;
-  difficulty: string;
+type Formula = { expression: string; explanation: string };
+type KeyFormula = { name: string; expression: string; explanation: string };
+type Definition = { term: string; definition: string };
+type Section = { heading: string; content: string; bullets: string[]; formulas?: Formula[] };
+
+type Notes = {
+  title: string;
+  summary: string;
+  sections: Section[];
+  definitions: Definition[];
+  keyFormulas: KeyFormula[];
+  concepts: string[];
+  summary_points: string[];
 };
 
-type QuizState = "setup" | "quiz" | "results";
-type TimerOption = { label: string; seconds: number };
+type HistoryItem = {
+  id: string;
+  title: string;
+  created_at: string;
+  is_pinned?: boolean;
+};
 
-const TIMER_OPTIONS: TimerOption[] = [
-  { label: "30s", seconds: 30 },
-  { label: "1 min", seconds: 60 },
-  { label: "2 min", seconds: 120 },
-  { label: "3 min", seconds: 180 },
-];
-
-// ---- shared tokens (mirrors landing/login/sidebar/dashboard/flashcards/notes) ----
+// ---- shared tokens (mirrors landing/login/sidebar/dashboard/flashcards) ----
 const T = {
   bg: "#0c0c0d",
   surface: "#131314",
@@ -29,873 +33,842 @@ const T = {
   text: "#f2f1ed",
   textMuted: "#8a8a86",
   red: "#f87171",
-  redBg: "rgba(248,113,113,0.08)",
   green: "#4ade80",
-  greenBg: "rgba(74,222,128,0.08)",
-  yellow: "#eab308",
 };
 
-export default function QuizArenaPage() {
-  const [state, setState] = useState<QuizState>("setup");
-  const [difficulty, setDifficulty] = useState("mixed");
-  const [count, setCount] = useState(10);
-  const [timerEnabled, setTimerEnabled] = useState(true);
-  const [timerSeconds, setTimerSeconds] = useState(60);
+function PanelToggleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+const MOBILE_BREAKPOINT = 768;
+
+export default function SmartNotesPage() {
   const [loading, setLoading] = useState(false);
+  const [fetchingNote, setFetchingNote] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [notes, setNotes] = useState<Notes | null>(null);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
 
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [currentQ, setCurrentQ] = useState(0);
-  const [answers, setAnswers] = useState<(string | null)[]>([]);
-  const [submitted, setSubmitted] = useState(false);
-  const [attemptId, setAttemptId] = useState<string | null>(null);
-  const [startTime, setStartTime] = useState<number>(0);
-  const [timeLeft, setTimeLeft] = useState(60);
-  const [timesUp, setTimesUp] = useState<boolean[]>([]);
-  const timerRef = useRef<NodeJS.Timeout | undefined>(undefined);
-
+  useEffect(() => { fetchHistory(); }, []);
+  useEffect(() => { if (editingId) editInputRef.current?.focus(); }, [editingId]);
   useEffect(() => {
-    if (state === "quiz" && timerEnabled && !submitted) {
-      clearInterval(timerRef.current);
-      setTimeLeft(timerSeconds);
-      timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current);
-            setTimesUp((t) => {
-              const next = [...t];
-              next[currentQ] = true;
-              return next;
-            });
-            if (currentQ + 1 < questions.length) {
-              setTimeout(() => setCurrentQ((q) => q + 1), 600);
-            }
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(timerRef.current);
-  }, [currentQ, state, submitted, timerEnabled]);
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+    setIsMobile(mql.matches);
+    setPanelOpen(!mql.matches);
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+      setPanelOpen(!e.matches);
+    };
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
 
-  async function startQuiz() {
-    if (!uploadedFiles.length) { setError("Upload at least one document."); return; }
+  async function fetchHistory() {
+    const res = await fetch("/api/smart-notes");
+    const data = await res.json();
+    setHistory(data.history ?? []);
+  }
+
+  async function handleFile(file: File) {
+    if (isMobile) setPanelOpen(false);
     setLoading(true);
     setError(null);
+    setNotes(null);
+    setActiveId(null);
 
     const formData = new FormData();
-    uploadedFiles.forEach((f) => formData.append("files", f));
-    formData.append("difficulty", difficulty);
-    formData.append("count", String(count));
+    formData.append("file", file);
 
-    const res = await fetch("/api/quiz-session", { method: "POST", body: formData });
+    const res = await fetch("/api/smart-notes", { method: "POST", body: formData });
     const data = await res.json();
     setLoading(false);
 
-    if (!res.ok) { setError(data.error ?? "Failed to generate quiz."); return; }
+    if (!res.ok) { setError(data.error ?? "Something went wrong."); return; }
 
-    setQuestions(data.questions);
-    setAttemptId(data.attemptId);
-    setAnswers(new Array(data.questions.length).fill(null));
-    setTimesUp(new Array(data.questions.length).fill(false));
-    setCurrentQ(0);
-    setSubmitted(false);
-    setStartTime(Date.now());
-    setState("quiz");
+    setNotes(data.notes);
+    setActiveId(data.id);
+    setHistory((prev) => [
+      { id: data.id, title: data.notes.title, created_at: new Date().toISOString(), is_pinned: false },
+      ...prev.filter((h) => h.id !== data.id),
+    ]);
   }
 
-  function selectAnswer(letter: string) {
-    if (submitted || timesUp[currentQ]) return;
-    const newAnswers = [...answers];
-    newAnswers[currentQ] = letter;
-    setAnswers(newAnswers);
+  async function handleHistoryClick(item: HistoryItem) {
+    if (activeId === item.id) return;
+    if (isMobile) setPanelOpen(false);
+    setFetchingNote(true);
+    setError(null);
+    setNotes(null);
+    setActiveId(item.id);
+
+    const res = await fetch(`/api/smart-notes?id=${item.id}`);
+    const data = await res.json();
+    setFetchingNote(false);
+
+    if (!res.ok) { setError(data.error ?? "Failed to load notes."); return; }
+    setNotes(data.notes);
   }
 
-  async function submitQuiz() {
-    clearInterval(timerRef.current);
-    const score = answers.filter((a, i) => a === questions[i]?.correct).length;
-    const timeTaken = Math.round((Date.now() - startTime) / 1000);
-    if (attemptId) {
-      await fetch("/api/quiz-session", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ attemptId, score, time_taken: timeTaken }),
-      });
+  async function handlePin(item: HistoryItem) {
+    const res = await fetch("/api/smart-notes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: item.id, is_pinned: !item.is_pinned }),
+    });
+    if (res.ok) {
+      setHistory((prev) =>
+        prev.map((h) => h.id === item.id ? { ...h, is_pinned: !h.is_pinned } : h)
+          .sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
+      );
     }
-    setSubmitted(true);
-    setState("results");
+    setMenuOpenId(null);
   }
 
-  function exitQuiz() {
-    clearInterval(timerRef.current);
-    setState("setup");
-    setQuestions([]);
-    setAnswers([]);
-    setSubmitted(false);
-    setCurrentQ(0);
-    setTimesUp([]);
+  async function handleDelete(item: HistoryItem) {
+    if (!confirm("Delete these notes?")) return;
+    const res = await fetch("/api/smart-notes", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: item.id }),
+    });
+    if (res.ok) {
+      setHistory((prev) => prev.filter((h) => h.id !== item.id));
+      if (activeId === item.id) { setNotes(null); setActiveId(null); }
+    }
+    setMenuOpenId(null);
   }
 
-  const currentQuestion = questions[currentQ];
-  const answeredCount = answers.filter((a) => a !== null).length;
+  function handleCopy() {
+    if (!notes) return;
+    const text = [
+      `# ${notes.title}`,
+      `\n## Summary\n${notes.summary}`,
+      notes.keyFormulas?.length ? `\n## Key Formulas\n${notes.keyFormulas.map((f) => `${f.name}: ${f.expression}\n${f.explanation}`).join("\n\n")}` : "",
+      ...notes.sections?.map((s) => `\n## ${s.heading}\n${s.content}\n${s.bullets?.map((b) => `• ${b}`).join("\n")}`) ?? [],
+      notes.definitions?.length ? `\n## Definitions\n${notes.definitions.map((d) => `${d.term}: ${d.definition}`).join("\n")}` : "",
+      `\n## Key Points\n${notes.summary_points?.map((p) => `• ${p}`).join("\n")}`,
+    ].filter(Boolean).join("\n");
 
-  // ─── SETUP ───────────────────────────────────────────────
-  if (state === "setup") {
-    return (
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  const isLoading = loading || fetchingNote;
+  const pinnedHistory = history.filter((h) => h.is_pinned);
+  const unpinnedHistory = history.filter((h) => !h.is_pinned);
+
+  return (
+    <div style={{ display: "flex", height: "100%", overflow: "hidden", background: T.bg, position: "relative" }}>
+
+      {isMobile && panelOpen && (
+        <div
+          onClick={() => setPanelOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 40 }}
+        />
+      )}
+
+      {/* Left panel */}
       <div style={{
+        width: "300px",
+        minWidth: "300px",
+        borderRight: `1px solid ${T.border}`,
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        height: "100%",
-        padding: "40px",
-        overflowY: "auto",
+        flexDirection: "column",
         background: T.bg,
+        ...(isMobile ? {
+          position: "fixed" as const,
+          top: 0, bottom: 0, left: 0,
+          zIndex: 50,
+          transform: panelOpen ? "translateX(0)" : "translateX(-100%)",
+          transition: "transform 0.25s ease",
+        } : {}),
       }}>
-        <div style={{ width: "100%", maxWidth: "520px" }}>
+        <div style={{ padding: "24px 20px 16px", borderBottom: `1px solid ${T.border}` }}>
           <div style={{
             fontFamily: "'JetBrains Mono', monospace",
             fontSize: "0.6rem",
             letterSpacing: "0.1em",
             textTransform: "uppercase",
             color: T.textMuted,
-            marginBottom: "8px",
+            marginBottom: "6px",
           }}>Learn</div>
           <h1 style={{
             fontFamily: "'Geist', sans-serif",
-            fontSize: "2rem",
+            fontSize: "1.3rem",
             fontWeight: 700,
-            letterSpacing: "-0.03em",
+            letterSpacing: "-0.02em",
             color: T.text,
-            marginBottom: "4px",
-          }}>Quiz Arena</h1>
-          <p style={{
-            fontFamily: "'Hanken Grotesk', sans-serif",
-            fontSize: "0.9rem",
-            color: T.textMuted,
-            marginBottom: "28px",
-          }}>Upload documents and test your knowledge.</p>
+            marginBottom: "16px",
+          }}>Smart Notes</h1>
+
+          {/* Drop zone */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const file = e.dataTransfer.files[0];
+              if (file) handleFile(file);
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              border: `1px dashed ${dragOver ? T.text : T.border}`,
+              borderRadius: "12px",
+              padding: "24px 16px",
+              textAlign: "center",
+              cursor: "pointer",
+              background: dragOver ? T.surfaceHover : T.surface,
+              transition: "all 0.2s ease",
+            }}
+          >
+            <div style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "0.65rem",
+              color: dragOver ? T.text : T.textMuted,
+              lineHeight: 1.8,
+            }}>
+              {loading ? "Generating notes..." : (
+                <>
+                  Drop file here<br />
+                  or click to upload<br />
+                  <span style={{ fontSize: "0.58rem", opacity: 0.7 }}>PDF, DOCX, PPTX, TXT, CSV</span>
+                </>
+              )}
+            </div>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,.pptx,.txt,.md,.csv,.xlsx"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleFile(file);
+              e.target.value = "";
+            }}
+          />
 
           {error && (
             <div style={{
-              padding: "10px 14px",
-              background: T.redBg,
+              marginTop: "10px",
+              padding: "10px 12px",
+              background: "rgba(248,113,113,0.08)",
               border: "1px solid rgba(248,113,113,0.25)",
               borderRadius: "8px",
               fontFamily: "'JetBrains Mono', monospace",
               fontSize: "0.68rem",
               color: T.red,
-              marginBottom: "16px",
             }}>{error}</div>
           )}
+        </div>
 
-          {/* File upload */}
-          <div style={{ marginBottom: "20px" }}>
-            <label style={{
+        {/* History */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
+          {history.length === 0 && (
+            <p style={{
               fontFamily: "'JetBrains Mono', monospace",
-              fontSize: "0.62rem",
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
+              fontSize: "0.65rem",
               color: T.textMuted,
-              display: "block",
-              marginBottom: "8px",
-            }}>Upload Documents</label>
-            <div
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                const files = Array.from(e.dataTransfer.files);
-                setUploadedFiles((prev) => [...prev, ...files]);
-              }}
-              onClick={() => fileInputRef.current?.click()}
-              style={{
-                border: `1px dashed ${dragOver ? T.text : T.border}`,
-                borderRadius: "12px",
-                padding: "20px 16px",
-                textAlign: "center",
-                cursor: "pointer",
-                background: dragOver ? T.surfaceHover : T.surface,
-                transition: "all 0.2s ease",
-                marginBottom: uploadedFiles.length ? "10px" : "0",
-              }}
-            >
-              <p style={{
-                fontFamily: "'Hanken Grotesk', sans-serif",
-                fontSize: "0.88rem",
-                color: T.textMuted,
-                marginBottom: "4px",
-              }}>Drop files here or click to upload</p>
+              textAlign: "center",
+              padding: "24px 16px",
+            }}>No notes yet</p>
+          )}
+
+          {pinnedHistory.length > 0 && (
+            <>
               <p style={{
                 fontFamily: "'JetBrains Mono', monospace",
-                fontSize: "0.58rem",
-                color: T.textMuted,
-              }}>PDF, DOCX, PPTX, TXT, CSV, XLSX — multiple files allowed</p>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.docx,.pptx,.txt,.md,.csv,.xlsx"
-              multiple
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const files = Array.from(e.target.files ?? []);
-                setUploadedFiles((prev) => [...prev, ...files]);
-                e.target.value = "";
-              }}
-            />
-            {uploadedFiles.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                {uploadedFiles.map((f, i) => (
-                  <div key={i} style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "8px 12px",
-                    background: T.surface,
-                    border: `1px solid ${T.border}`,
-                    borderRadius: "8px",
-                  }}>
-                    <span style={{
-                      fontFamily: "'Hanken Grotesk', sans-serif",
-                      fontSize: "0.8rem",
-                      color: T.text,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}>{f.name}</span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setUploadedFiles((prev) => prev.filter((_, j) => j !== i)); }}
-                      style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", flexShrink: 0, marginLeft: "8px", fontSize: "0.9rem" }}
-                    >x</button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Difficulty */}
-          <div style={{ marginBottom: "20px" }}>
-            <label style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: "0.62rem",
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: T.textMuted,
-              display: "block",
-              marginBottom: "8px",
-            }}>Difficulty</label>
-            <div style={{ display: "flex", gap: "8px" }}>
-              {["easy", "medium", "hard", "mixed"].map((d) => (
-                <button
-                  key={d}
-                  onClick={() => setDifficulty(d)}
-                  style={{
-                    flex: 1,
-                    padding: "8px",
-                    border: `1px solid ${difficulty === d ? T.text : T.border}`,
-                    background: difficulty === d ? T.surfaceHover : T.surface,
-                    color: difficulty === d ? T.text : T.textMuted,
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: "0.62rem",
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    borderRadius: "999px",
-                    cursor: "pointer",
-                    transition: "all 0.15s",
-                  }}
-                >{d}</button>
-              ))}
-            </div>
-          </div>
-
-          {/* Count */}
-          <div style={{ marginBottom: "20px" }}>
-            <label style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: "0.62rem",
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: T.textMuted,
-              display: "block",
-              marginBottom: "8px",
-            }}>Number of Questions</label>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              {[5, 10, 15, 20, 25, 30].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setCount(n)}
-                  style={{
-                    padding: "8px 14px",
-                    border: `1px solid ${count === n ? T.text : T.border}`,
-                    background: count === n ? T.surfaceHover : T.surface,
-                    color: count === n ? T.text : T.textMuted,
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: "0.7rem",
-                    borderRadius: "999px",
-                    cursor: "pointer",
-                    transition: "all 0.15s",
-                  }}
-                >{n}</button>
-              ))}
-            </div>
-          </div>
-
-          {/* Timer */}
-          <div style={{ marginBottom: "28px" }}>
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: "10px",
-            }}>
-              <label style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: "0.62rem",
-                letterSpacing: "0.08em",
+                fontSize: "0.55rem",
+                letterSpacing: "0.1em",
                 textTransform: "uppercase",
                 color: T.textMuted,
-              }}>Timer per Question</label>
-              <button
-                onClick={() => setTimerEnabled((v) => !v)}
-                style={{
-                  width: "40px",
-                  height: "22px",
-                  borderRadius: "999px",
-                  border: `1px solid ${T.border}`,
-                  background: timerEnabled ? T.text : "transparent",
-                  cursor: "pointer",
-                  position: "relative",
-                  transition: "background 0.2s ease",
-                  flexShrink: 0,
-                }}
-              >
-                <div style={{
-                  position: "absolute",
-                  top: "2px",
-                  left: timerEnabled ? "20px" : "2px",
-                  width: "16px",
-                  height: "16px",
-                  borderRadius: "50%",
-                  background: timerEnabled ? T.bg : T.textMuted,
-                  transition: "left 0.2s ease",
-                }} />
-              </button>
-            </div>
-            {timerEnabled && (
-              <div style={{ display: "flex", gap: "8px" }}>
-                {TIMER_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.seconds}
-                    onClick={() => setTimerSeconds(opt.seconds)}
-                    style={{
-                      flex: 1,
-                      padding: "8px",
-                      border: `1px solid ${timerSeconds === opt.seconds ? T.text : T.border}`,
-                      background: timerSeconds === opt.seconds ? T.surfaceHover : T.surface,
-                      color: timerSeconds === opt.seconds ? T.text : T.textMuted,
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: "0.65rem",
-                      borderRadius: "999px",
-                      cursor: "pointer",
-                      transition: "all 0.15s",
-                    }}
-                  >{opt.label}</button>
-                ))}
-              </div>
-            )}
-          </div>
+                padding: "8px 16px 4px",
+              }}>Pinned</p>
+              {pinnedHistory.map((item) => (
+                <NoteHistoryRow
+                  key={item.id}
+                  item={item}
+                  active={activeId === item.id}
+                  hovered={hoveredId === item.id}
+                  menuOpen={menuOpenId === item.id}
+                  editing={editingId === item.id}
+                  editValue={editValue}
+                  editInputRef={editInputRef}
+                  onMouseEnter={() => setHoveredId(item.id)}
+                  onMouseLeave={() => { setHoveredId(null); setMenuOpenId(null); }}
+                  onClick={() => handleHistoryClick(item)}
+                  onMenuToggle={() => setMenuOpenId(menuOpenId === item.id ? null : item.id)}
+                  onPin={() => handlePin(item)}
+                  onDelete={() => handleDelete(item)}
+                  onRenameStart={() => { setEditingId(item.id); setEditValue(item.title); setMenuOpenId(null); }}
+                  onRenameChange={setEditValue}
+                  onRenameSubmit={() => { setEditingId(null); }}
+                  onRenameCancel={() => setEditingId(null)}
+                />
+              ))}
+            </>
+          )}
 
-          <button
-            onClick={startQuiz}
-            disabled={loading || !uploadedFiles.length}
-            style={{
-              width: "100%",
-              padding: "14px",
-              background: loading || !uploadedFiles.length ? T.surface : T.text,
-              color: loading || !uploadedFiles.length ? T.textMuted : T.bg,
-              fontFamily: "'Hanken Grotesk', sans-serif",
-              fontWeight: 700,
-              fontSize: "0.95rem",
-              border: `1px solid ${loading || !uploadedFiles.length ? T.border : "transparent"}`,
-              borderRadius: "999px",
-              cursor: loading || !uploadedFiles.length ? "not-allowed" : "pointer",
-              transition: "opacity 0.2s ease",
-            }}
-          >{loading ? "Generating Quiz..." : "Start Quiz"}</button>
+          {unpinnedHistory.length > 0 && (
+            <>
+              <p style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: "0.55rem",
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                color: T.textMuted,
+                padding: "8px 16px 4px",
+              }}>Recent</p>
+              {unpinnedHistory.map((item) => (
+                <NoteHistoryRow
+                  key={item.id}
+                  item={item}
+                  active={activeId === item.id}
+                  hovered={hoveredId === item.id}
+                  menuOpen={menuOpenId === item.id}
+                  editing={editingId === item.id}
+                  editValue={editValue}
+                  editInputRef={editInputRef}
+                  onMouseEnter={() => setHoveredId(item.id)}
+                  onMouseLeave={() => { setHoveredId(null); setMenuOpenId(null); }}
+                  onClick={() => handleHistoryClick(item)}
+                  onMenuToggle={() => setMenuOpenId(menuOpenId === item.id ? null : item.id)}
+                  onPin={() => handlePin(item)}
+                  onDelete={() => handleDelete(item)}
+                  onRenameStart={() => { setEditingId(item.id); setEditValue(item.title); setMenuOpenId(null); }}
+                  onRenameChange={setEditValue}
+                  onRenameSubmit={() => { setEditingId(null); }}
+                  onRenameCancel={() => setEditingId(null)}
+                />
+              ))}
+            </>
+          )}
         </div>
       </div>
-    );
-  }
 
-  // ─── QUIZ ────────────────────────────────────────────────
-  if (state === "quiz" && currentQuestion) {
-    const diffColor = currentQuestion.difficulty === "easy"
-      ? T.green : currentQuestion.difficulty === "hard"
-      ? T.red : T.yellow;
-    const selectedAnswer = answers[currentQ];
-
-    return (
-      <div style={{ display: "flex", height: "100%", overflow: "hidden", background: T.bg }}>
-
-        {/* Left — question grid */}
-        <div style={{
-          width: "200px",
-          minWidth: "200px",
-          borderRight: `1px solid ${T.border}`,
-          display: "flex",
-          flexDirection: "column",
-          background: T.bg,
-          padding: "16px",
-        }}>
-          <p style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: "0.55rem",
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-            color: T.textMuted,
-            marginBottom: "12px",
-          }}>Questions</p>
-
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
-            gap: "5px",
-            marginBottom: "16px",
-          }}>
-            {questions.map((_, i) => {
-              const isActive = i === currentQ;
-              const isAnswered = answers[i] !== null;
-              const isTimedOut = timesUp[i];
-              return (
-                <button
-                  key={i}
-                  onClick={() => setCurrentQ(i)}
-                  style={{
-                    aspectRatio: "1",
-                    border: `1px solid ${isActive ? T.text : isTimedOut ? "rgba(248,113,113,0.4)" : isAnswered ? "rgba(74,222,128,0.4)" : T.border}`,
-                    background: isActive ? T.text : isTimedOut ? T.redBg : isAnswered ? T.greenBg : T.surface,
-                    color: isActive ? T.bg : isTimedOut ? T.red : isAnswered ? T.green : T.textMuted,
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: "0.6rem",
-                    fontWeight: isActive ? 700 : 400,
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >{i + 1}</button>
-              );
-            })}
-          </div>
-
-          {/* Legend */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginBottom: "auto" }}>
-            {[
-              { color: T.green, label: "Answered" },
-              { color: T.textMuted, label: "Not answered" },
-              { color: T.red, label: "Timed out" },
-            ].map((item) => (
-              <div key={item.label} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <div style={{ width: "8px", height: "8px", borderRadius: "2px", background: item.color, flexShrink: 0 }} />
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.52rem", color: T.textMuted }}>{item.label}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Submit + Exit */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "16px" }}>
-            <button
-              onClick={submitQuiz}
-              style={{
-                padding: "10px",
-                background: T.text,
-                border: "none",
-                borderRadius: "999px",
-                color: T.bg,
-                fontFamily: "'Hanken Grotesk', sans-serif",
-                fontWeight: 600,
-                fontSize: "0.8rem",
-                cursor: "pointer",
-              }}
-            >Submit ({answeredCount}/{questions.length})</button>
-            <button
-              onClick={exitQuiz}
-              style={{
-                padding: "10px",
-                background: "transparent",
-                border: `1px solid ${T.border}`,
-                borderRadius: "999px",
-                color: T.textMuted,
-                fontFamily: "'Hanken Grotesk', sans-serif",
-                fontSize: "0.8rem",
-                cursor: "pointer",
-              }}
-            >Exit Quiz</button>
-          </div>
-        </div>
-
-        {/* Right — question */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "32px" }}>
-          {/* Top bar */}
+      {/* Right panel */}
+      <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "16px 18px" : "32px 40px" }}>
+        {isMobile && (
+          <button
+            onClick={() => setPanelOpen(true)}
+            style={{
+              width: "34px", height: "34px", borderRadius: "8px",
+              background: T.surface, border: `1px solid ${T.border}`, color: T.text,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              marginBottom: "16px",
+            }}
+          ><PanelToggleIcon /></button>
+        )}
+        {!notes && !isLoading && (
           <div style={{
             display: "flex",
+            flexDirection: "column",
             alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: "28px",
-          }}>
-            <div style={{ flex: 1, marginRight: "24px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-                <span style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: "0.62rem",
-                  color: T.textMuted,
-                }}>Q{currentQ + 1} / {questions.length}</span>
-                <span style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: "0.62rem",
-                  color: diffColor,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                }}>{currentQuestion.difficulty}</span>
-              </div>
-              <div style={{ height: "3px", background: T.border, borderRadius: "999px" }}>
-                <div style={{
-                  height: "100%",
-                  width: `${((currentQ + 1) / questions.length) * 100}%`,
-                  background: T.text,
-                  borderRadius: "999px",
-                  transition: "width 0.3s",
-                }} />
-              </div>
-            </div>
-
-            {timerEnabled && (
-              <div style={{
-                width: "52px",
-                height: "52px",
-                borderRadius: "50%",
-                border: `2px solid ${timeLeft <= 10 ? T.red : T.border}`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-              }}>
-                <span style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: "1rem",
-                  fontWeight: 700,
-                  color: timeLeft <= 10 ? T.red : T.text,
-                }}>{timeLeft}</span>
-              </div>
-            )}
-          </div>
-
-          <div style={{ maxWidth: "620px" }}>
-            <h2 style={{
-              fontFamily: "'Geist', sans-serif",
-              fontSize: "1.15rem",
-              fontWeight: 600,
-              color: T.text,
-              lineHeight: 1.6,
-              marginBottom: "28px",
-            }}>{currentQuestion.question}</h2>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {currentQuestion.options.map((option) => {
-                const letter = option.charAt(0);
-                const isSelected = selectedAnswer === letter;
-                return (
-                  <button
-                    key={option}
-                    onClick={() => selectAnswer(letter)}
-                    style={{
-                      width: "100%",
-                      padding: "14px 18px",
-                      background: isSelected ? T.surfaceHover : T.surface,
-                      border: `1px solid ${isSelected ? T.text : T.border}`,
-                      borderRadius: "10px",
-                      color: isSelected ? T.text : T.text,
-                      fontFamily: "'Hanken Grotesk', sans-serif",
-                      fontSize: "0.9rem",
-                      textAlign: "left",
-                      cursor: "pointer",
-                      transition: "all 0.15s",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                    }}
-                  >
-                    <span style={{
-                      width: "28px",
-                      height: "28px",
-                      borderRadius: "8px",
-                      background: isSelected ? T.text : T.bg,
-                      border: `1px solid ${isSelected ? T.text : T.border}`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: "0.75rem",
-                      fontWeight: 700,
-                      flexShrink: 0,
-                      color: isSelected ? T.bg : T.textMuted,
-                    }}>{letter}</span>
-                    {option.slice(3)}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Navigation */}
-            <div style={{ display: "flex", gap: "10px", marginTop: "24px" }}>
-              <button
-                onClick={() => setCurrentQ((q) => Math.max(0, q - 1))}
-                disabled={currentQ === 0}
-                style={{
-                  flex: 1, padding: "12px",
-                  background: "transparent",
-                  border: `1px solid ${T.border}`,
-                  borderRadius: "999px",
-                  color: currentQ === 0 ? T.textMuted : T.text,
-                  fontFamily: "'Hanken Grotesk', sans-serif",
-                  fontSize: "0.88rem",
-                  cursor: currentQ === 0 ? "not-allowed" : "pointer",
-                  opacity: currentQ === 0 ? 0.5 : 1,
-                }}
-              >← Previous</button>
-              <button
-                onClick={() => setCurrentQ((q) => Math.min(questions.length - 1, q + 1))}
-                disabled={currentQ === questions.length - 1}
-                style={{
-                  flex: 1, padding: "12px",
-                  background: T.text,
-                  border: "none",
-                  borderRadius: "999px",
-                  color: T.bg,
-                  fontFamily: "'Hanken Grotesk', sans-serif",
-                  fontSize: "0.88rem",
-                  cursor: currentQ === questions.length - 1 ? "not-allowed" : "pointer",
-                  opacity: currentQ === questions.length - 1 ? 0.5 : 1,
-                }}
-              >Next →</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── RESULTS ─────────────────────────────────────────────
-  if (state === "results") {
-    const score = answers.filter((a, i) => a === questions[i]?.correct).length;
-    const pct = Math.round((score / questions.length) * 100);
-    const rating = (() => {
-      if (pct >= 90) return { label: "Expert", color: T.green };
-      if (pct >= 70) return { label: "Proficient", color: T.text };
-      if (pct >= 50) return { label: "Learner", color: T.yellow };
-      return { label: "Beginner", color: T.red };
-    })();
-
-    return (
-      <div style={{ overflowY: "auto", height: "100%", padding: "40px 32px", background: T.bg }}>
-        <div style={{ maxWidth: "680px", margin: "0 auto" }}>
-
-          {/* Score card */}
-          <div style={{
-            padding: "32px",
-            background: T.surface,
-            border: `1px solid ${T.border}`,
-            borderRadius: "18px",
-            marginBottom: "28px",
+            justifyContent: "center",
+            height: "100%",
+            gap: "12px",
             textAlign: "center",
           }}>
             <div style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: "0.62rem",
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              color: T.textMuted,
-              marginBottom: "16px",
-            }}>Quiz Complete</div>
-            <div style={{
+              width: "60px",
+              height: "60px",
+              borderRadius: "14px",
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "1.6rem",
+            }}>📄</div>
+            <h2 style={{
               fontFamily: "'Geist', sans-serif",
-              fontSize: "4rem",
-              fontWeight: 800,
-              color: rating.color,
-              lineHeight: 1,
-              marginBottom: "8px",
-            }}>{pct}%</div>
-            <div style={{
-              fontFamily: "'Geist', sans-serif",
-              fontSize: "1.2rem",
+              fontSize: "1.1rem",
               fontWeight: 600,
-              color: rating.color,
-              marginBottom: "24px",
-            }}>{rating.label}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "1px", background: T.border, border: `1px solid ${T.border}`, borderRadius: "12px", overflow: "hidden" }}>
-              {[
-                { label: "Correct", value: score, color: T.green },
-                { label: "Wrong", value: questions.length - score, color: T.red },
-                { label: "Total", value: questions.length, color: T.text },
-              ].map((stat) => (
-                <div key={stat.label} style={{ padding: "14px", background: T.bg }}>
-                  <p style={{ fontFamily: "'Geist', sans-serif", fontSize: "1.5rem", fontWeight: 700, color: stat.color, marginBottom: "2px" }}>{stat.value}</p>
-                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.58rem", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{stat.label}</p>
-                </div>
-              ))}
+              color: T.text,
+            }}>Upload a Document</h2>
+            <p style={{
+              fontFamily: "'Hanken Grotesk', sans-serif",
+              fontSize: "0.85rem",
+              color: T.textMuted,
+              maxWidth: "320px",
+              lineHeight: 1.6,
+            }}>
+              Drop any PDF, DOCX, PPTX, or text file to instantly generate comprehensive structured notes.
+            </p>
+          </div>
+        )}
+
+        {isLoading && (
+          <div style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            height: "100%",
+            gap: "16px",
+          }}>
+            <div style={{
+              width: "36px",
+              height: "36px",
+              border: `2px solid ${T.border}`,
+              borderTop: `2px solid ${T.text}`,
+              borderRadius: "50%",
+              animation: "spin 0.8s linear infinite",
+            }} />
+            <p style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "0.75rem",
+              color: T.textMuted,
+              letterSpacing: "0.06em",
+            }}>{fetchingNote ? "Loading notes..." : "Extracting text and generating notes..."}</p>
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
+
+        {notes && !isLoading && (
+          <div style={{ maxWidth: "800px", margin: "0 auto" }}>
+
+            {/* Title + copy */}
+            <div style={{
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              marginBottom: "32px",
+              gap: "16px",
+            }}>
+              <div>
+                <div style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: "0.6rem",
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  color: T.textMuted,
+                  marginBottom: "6px",
+                }}>Smart Notes</div>
+                <h2 style={{
+                  fontFamily: "'Geist', sans-serif",
+                  fontSize: "1.6rem",
+                  fontWeight: 700,
+                  letterSpacing: "-0.02em",
+                  color: T.text,
+                  lineHeight: 1.2,
+                }}>{notes.title}</h2>
+              </div>
+              <button
+                onClick={handleCopy}
+                style={{
+                  padding: "8px 18px",
+                  background: copied ? "rgba(74,222,128,0.1)" : "transparent",
+                  border: `1px solid ${copied ? "rgba(74,222,128,0.35)" : T.border}`,
+                  borderRadius: "999px",
+                  color: copied ? T.green : T.text,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: "0.68rem",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                  transition: "all 0.2s ease",
+                }}
+              >{copied ? "Copied!" : "Copy Notes"}</button>
             </div>
-          </div>
 
-          {/* Buttons */}
-          <div style={{ display: "flex", gap: "12px", marginBottom: "32px" }}>
-            <button
-              onClick={() => {
-                setAnswers(new Array(questions.length).fill(null));
-                setTimesUp(new Array(questions.length).fill(false));
-                setCurrentQ(0);
-                setSubmitted(false);
-                setStartTime(Date.now());
-                setState("quiz");
-              }}
-              style={{
-                flex: 1, padding: "12px",
-                background: "transparent",
-                border: `1px solid ${T.border}`,
-                borderRadius: "999px",
+            {/* Summary */}
+            <div style={{
+              padding: "20px 24px",
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              borderRadius: "14px",
+              marginBottom: "24px",
+            }}>
+              <p style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: "0.6rem",
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                color: T.textMuted,
+                marginBottom: "10px",
+              }}>Summary</p>
+              <p style={{
+                fontFamily: "'Hanken Grotesk', sans-serif",
+                fontSize: "0.95rem",
                 color: T.text,
-                fontFamily: "'Hanken Grotesk', sans-serif",
-                fontWeight: 600,
-                fontSize: "0.88rem",
-                cursor: "pointer",
-              }}
-            >Retry Same Quiz</button>
-            <button
-              onClick={() => setState("setup")}
-              style={{
-                flex: 1, padding: "12px",
-                background: T.text,
-                border: "none",
-                borderRadius: "999px",
-                color: T.bg,
-                fontFamily: "'Hanken Grotesk', sans-serif",
-                fontWeight: 600,
-                fontSize: "0.88rem",
-                cursor: "pointer",
-              }}
-            >New Quiz</button>
-          </div>
+                lineHeight: 1.8,
+              }}>{notes.summary}</p>
+            </div>
 
-          {/* Full review */}
-          <h3 style={{
-            fontFamily: "'Geist', sans-serif",
-            fontSize: "1rem",
-            fontWeight: 600,
-            color: T.text,
-            marginBottom: "16px",
-          }}>Full Review</h3>
+            {/* Key Formulas */}
+            {notes.keyFormulas?.length > 0 && (
+              <div style={{ marginBottom: "24px" }}>
+                <h3 style={{
+                  fontFamily: "'Geist', sans-serif",
+                  fontSize: "1rem",
+                  fontWeight: 600,
+                  color: T.text,
+                  marginBottom: "12px",
+                }}>Key Formulas</h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {notes.keyFormulas.map((f, i) => (
+                    <div key={i} style={{
+                      padding: "16px 18px",
+                      background: T.surface,
+                      border: `1px solid ${T.border}`,
+                      borderRadius: "10px",
+                    }}>
+                      <p style={{
+                        fontFamily: "'Geist', sans-serif",
+                        fontSize: "0.82rem",
+                        fontWeight: 600,
+                        color: T.text,
+                        marginBottom: "8px",
+                      }}>{f.name}</p>
+                      <p style={{
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: "0.95rem",
+                        color: T.text,
+                        padding: "8px 12px",
+                        background: T.bg,
+                        border: `1px solid ${T.border}`,
+                        borderRadius: "6px",
+                        marginBottom: "8px",
+                      }}>{f.expression}</p>
+                      <p style={{
+                        fontFamily: "'Hanken Grotesk', sans-serif",
+                        fontSize: "0.82rem",
+                        color: T.textMuted,
+                        lineHeight: 1.6,
+                      }}>{f.explanation}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {questions.map((q, i) => {
-              const userAnswer = answers[i];
-              const isCorrect = userAnswer === q.correct;
-              const wasTimedOut = timesUp[i] && !userAnswer;
-
-              return (
-                <div key={i} style={{
-                  padding: "18px 20px",
-                  background: T.surface,
-                  border: `1px solid ${isCorrect ? "rgba(74,222,128,0.3)" : "rgba(248,113,113,0.3)"}`,
-                  borderRadius: "12px",
-                  borderLeft: `3px solid ${isCorrect ? T.green : T.red}`,
+            {/* Sections */}
+            {notes.sections?.map((section, i) => (
+              <div key={i} style={{ marginBottom: "24px" }}>
+                <h3 style={{
+                  fontFamily: "'Geist', sans-serif",
+                  fontSize: "1rem",
+                  fontWeight: 600,
+                  color: T.text,
+                  marginBottom: "10px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
                 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.62rem", color: T.textMuted }}>Q{i + 1}</span>
-                    <span style={{
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: "0.6rem",
-                      color: isCorrect ? T.green : T.red,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                    }}>{wasTimedOut ? "Timed Out" : isCorrect ? "Correct" : "Wrong"}</span>
-                  </div>
-
+                  <span style={{
+                    width: "4px", height: "16px",
+                    background: T.textMuted,
+                    borderRadius: "2px",
+                    display: "inline-block",
+                    flexShrink: 0,
+                  }} />
+                  {section.heading}
+                </h3>
+                {section.content && (
                   <p style={{
                     fontFamily: "'Hanken Grotesk', sans-serif",
-                    fontSize: "0.9rem",
-                    fontWeight: 600,
-                    color: T.text,
-                    lineHeight: 1.5,
+                    fontSize: "0.88rem",
+                    color: T.textMuted,
+                    lineHeight: 1.8,
                     marginBottom: "12px",
-                  }}>{q.question}</p>
-
+                  }}>{section.content}</p>
+                )}
+                {section.bullets?.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "12px" }}>
-                    {q.options.map((opt) => {
-                      const letter = opt.charAt(0);
-                      const isCorrectOpt = letter === q.correct;
-                      const isUserOpt = letter === userAnswer;
-
-                      let bg = "transparent";
-                      let border = T.border;
-                      let color = T.textMuted;
-
-                      if (isCorrectOpt) { bg = T.greenBg; border = "rgba(74,222,128,0.3)"; color = T.green; }
-                      else if (isUserOpt && !isCorrectOpt) { bg = T.redBg; border = "rgba(248,113,113,0.3)"; color = T.red; }
-
-                      return (
-                        <div key={opt} style={{
-                          padding: "8px 12px",
-                          background: bg,
-                          border: `1px solid ${border}`,
-                          borderRadius: "8px",
-                          color,
+                    {section.bullets.map((bullet, j) => (
+                      <div key={j} style={{
+                        display: "flex", gap: "10px", alignItems: "flex-start",
+                        padding: "10px 14px",
+                        background: T.surface,
+                        borderRadius: "8px",
+                      }}>
+                        <span style={{ color: T.textMuted, marginTop: "4px", flexShrink: 0, fontSize: "0.7rem" }}>▸</span>
+                        <p style={{
                           fontFamily: "'Hanken Grotesk', sans-serif",
-                          fontSize: "0.82rem",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                        }}>
-                          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.65rem", fontWeight: 700 }}>{letter}</span>
-                          {opt.slice(3)}
-                          {isCorrectOpt && <span style={{ marginLeft: "auto", fontSize: "0.7rem" }}>✓</span>}
-                          {isUserOpt && !isCorrectOpt && <span style={{ marginLeft: "auto", fontSize: "0.7rem" }}>✗</span>}
-                        </div>
-                      );
-                    })}
+                          fontSize: "0.85rem",
+                          color: T.textMuted,
+                          lineHeight: 1.7,
+                        }}>{bullet}</p>
+                      </div>
+                    ))}
                   </div>
-
-                  <div style={{
+                )}
+                {section.formulas?.map((f, j) => (
+                  <div key={j} style={{
                     padding: "10px 14px",
-                    background: T.bg,
+                    background: T.surface,
                     border: `1px solid ${T.border}`,
                     borderRadius: "8px",
-                    fontFamily: "'Hanken Grotesk', sans-serif",
-                    fontSize: "0.82rem",
-                    color: T.textMuted,
-                    lineHeight: 1.6,
+                    marginBottom: "6px",
                   }}>
-                    <span style={{
+                    <p style={{
                       fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: "0.6rem",
+                      fontSize: "0.85rem",
+                      color: T.text,
+                      marginBottom: "4px",
+                    }}>{f.expression}</p>
+                    <p style={{
+                      fontFamily: "'Hanken Grotesk', sans-serif",
+                      fontSize: "0.78rem",
                       color: T.textMuted,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                    }}>Explanation: </span>
-                    {q.explanation}
+                    }}>{f.explanation}</p>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    );
-  }
+                ))}
+              </div>
+            ))}
 
-  return null;
+            {/* Definitions */}
+            {notes.definitions?.length > 0 && (
+              <div style={{ marginBottom: "24px" }}>
+                <h3 style={{
+                  fontFamily: "'Geist', sans-serif",
+                  fontSize: "1rem",
+                  fontWeight: 600,
+                  color: T.text,
+                  marginBottom: "12px",
+                }}>Definitions</h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {notes.definitions.map((def, i) => (
+                    <div key={i} style={{
+                      padding: "14px 16px",
+                      background: T.surface,
+                      border: `1px solid ${T.border}`,
+                      borderRadius: "10px",
+                      display: "flex",
+                      gap: "12px",
+                      alignItems: "flex-start",
+                    }}>
+                      <span style={{
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontSize: "0.78rem",
+                        fontWeight: 600,
+                        color: T.text,
+                        flexShrink: 0,
+                        minWidth: "100px",
+                      }}>{def.term}</span>
+                      <p style={{
+                        fontFamily: "'Hanken Grotesk', sans-serif",
+                        fontSize: "0.85rem",
+                        color: T.textMuted,
+                        lineHeight: 1.6,
+                      }}>{def.definition}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Concepts */}
+            {notes.concepts?.length > 0 && (
+              <div style={{ marginBottom: "24px" }}>
+                <h3 style={{
+                  fontFamily: "'Geist', sans-serif",
+                  fontSize: "1rem",
+                  fontWeight: 600,
+                  color: T.text,
+                  marginBottom: "12px",
+                }}>Key Concepts</h3>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  {notes.concepts.map((concept, i) => (
+                    <span key={i} style={{
+                      padding: "5px 14px",
+                      background: T.surface,
+                      border: `1px solid ${T.border}`,
+                      borderRadius: "999px",
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: "0.7rem",
+                      color: T.text,
+                    }}>{concept}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Summary Points */}
+            {notes.summary_points?.length > 0 && (
+              <div style={{
+                padding: "20px 24px",
+                background: T.surface,
+                border: `1px solid ${T.border}`,
+                borderRadius: "14px",
+                marginBottom: "40px",
+              }}>
+                <h3 style={{
+                  fontFamily: "'Geist', sans-serif",
+                  fontSize: "0.95rem",
+                  fontWeight: 600,
+                  color: T.text,
+                  marginBottom: "12px",
+                }}>Key Points</h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {notes.summary_points.map((point, i) => (
+                    <div key={i} style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
+                      <span style={{ color: T.green, flexShrink: 0, marginTop: "2px" }}>✓</span>
+                      <p style={{
+                        fontFamily: "'Hanken Grotesk', sans-serif",
+                        fontSize: "0.88rem",
+                        color: T.text,
+                        lineHeight: 1.7,
+                      }}>{point}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NoteHistoryRow({
+  item, active, hovered, menuOpen, editing, editValue, editInputRef,
+  onMouseEnter, onMouseLeave, onClick, onMenuToggle,
+  onPin, onDelete, onRenameStart, onRenameChange, onRenameSubmit, onRenameCancel,
+}: {
+  item: HistoryItem;
+  active: boolean;
+  hovered: boolean;
+  menuOpen: boolean;
+  editing: boolean;
+  editValue: string;
+  editInputRef: React.RefObject<HTMLInputElement | null>;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  onClick: () => void;
+  onMenuToggle: () => void;
+  onPin: () => void;
+  onDelete: () => void;
+  onRenameStart: () => void;
+  onRenameChange: (v: string) => void;
+  onRenameSubmit: () => void;
+  onRenameCancel: () => void;
+}) {
+  return (
+    <div onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={{ position: "relative" }}>
+      <div
+        onClick={editing ? undefined : onClick}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "10px 12px 10px 16px",
+          borderLeft: active ? `2px solid ${T.text}` : "2px solid transparent",
+          background: active ? T.surfaceHover : hovered ? "rgba(255,255,255,0.025)" : "transparent",
+          cursor: editing ? "default" : "pointer",
+          transition: "all 0.15s",
+          gap: "6px",
+        }}
+      >
+        {editing ? (
+          <input
+            ref={editInputRef}
+            value={editValue}
+            onChange={(e) => onRenameChange(e.target.value)}
+            onBlur={onRenameSubmit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onRenameSubmit();
+              if (e.key === "Escape") onRenameCancel();
+            }}
+            style={{
+              flex: 1,
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              borderRadius: "4px",
+              outline: "none",
+              color: T.text,
+              fontFamily: "'Hanken Grotesk', sans-serif",
+              fontSize: "0.8rem",
+              padding: "2px 6px",
+            }}
+          />
+        ) : (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{
+              fontFamily: "'Hanken Grotesk', sans-serif",
+              fontSize: "0.8rem",
+              color: active ? T.text : T.textMuted,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              marginBottom: "2px",
+            }}>
+              {item.is_pinned ? "📌 " : ""}{item.title}
+            </p>
+            <p style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "0.58rem",
+              color: T.textMuted,
+            }}>
+              {new Date(item.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+            </p>
+          </div>
+        )}
+
+        {hovered && !editing && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onMenuToggle(); }}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              padding: "2px 4px", color: T.textMuted,
+              fontSize: "0.75rem", flexShrink: 0,
+            }}
+          >•••</button>
+        )}
+      </div>
+
+      {menuOpen && (
+        <div style={{
+          position: "absolute", right: "8px", top: "100%", zIndex: 100,
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          borderRadius: "10px",
+          display: "flex", flexDirection: "column",
+          minWidth: "130px",
+          boxShadow: "0 12px 28px rgba(0,0,0,0.5)",
+          overflow: "hidden",
+        }}>
+          {[
+            { label: "Rename", action: onRenameStart, color: T.text },
+            { label: item.is_pinned ? "Unpin" : "Pin", action: onPin, color: T.text },
+            { label: "Delete", action: onDelete, color: T.red },
+          ].map((menuItem) => (
+            <button
+              key={menuItem.label}
+              onClick={(e) => { e.stopPropagation(); menuItem.action(); }}
+              style={{
+                padding: "9px 14px",
+                fontFamily: "'Hanken Grotesk', sans-serif",
+                fontSize: "0.8rem",
+                textAlign: "left",
+                background: "none",
+                border: "none",
+                borderBottom: menuItem.label !== "Delete" ? `1px solid ${T.border}` : "none",
+                color: menuItem.color,
+                cursor: "pointer",
+              }}
+            >{menuItem.label}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }

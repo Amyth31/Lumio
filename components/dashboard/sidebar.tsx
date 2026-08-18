@@ -25,7 +25,7 @@ const learnLinks = [
   { href: "/learn/flashcards", label: "Flashcards" },
 ];
 
-// ---- shared tokens (mirrors the landing/login pages) ----
+// ---- shared tokens (mirrors landing/login/dashboard/learn pages) ----
 const T = {
   bg: "#0c0c0d",
   surface: "#131314",
@@ -33,12 +33,58 @@ const T = {
   border: "rgba(255,255,255,0.09)",
   text: "#f2f1ed",
   textMuted: "#8a8a86",
-  accent: "#3654e0",
   red: "#f87171",
   yellow: "#eab308",
 };
 
-export function Sidebar({ onTimerClick }: { onTimerClick?: () => void }) {
+function Icon({ name }: { name: string }) {
+  const common = {
+    width: 18,
+    height: 18,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  switch (name) {
+    case "plus":
+      return <svg {...common}><path d="M12 5v14M5 12h14" /></svg>;
+    case "chevronLeft":
+      return <svg {...common}><path d="M15 18l-6-6 6-6" /></svg>;
+    case "chevronRight":
+      return <svg {...common}><path d="M9 18l6-6-6-6" /></svg>;
+    case "book":
+      return <svg {...common}><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5v-17z" /><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /></svg>;
+    case "chart":
+      return <svg {...common}><path d="M4 20V10M12 20V4M20 20v-7" /><path d="M2 20h20" /></svg>;
+    case "clock":
+      return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></svg>;
+    case "logout":
+      return <svg {...common}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></svg>;
+    case "menu":
+      return <svg {...common}><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
+    default:
+      return null;
+  }
+}
+
+export function Sidebar({
+  onTimerClick,
+  collapsed,
+  onToggleCollapse,
+  mobileOpen,
+  onCloseMobile,
+  isMobile,
+}: {
+  onTimerClick?: () => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  mobileOpen: boolean;
+  onCloseMobile: () => void;
+  isMobile: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -50,6 +96,12 @@ export function Sidebar({ onTimerClick }: { onTimerClick?: () => void }) {
   useEffect(() => {
     fetchSessions();
     fetchProfile();
+  }, [pathname]);
+
+  // Auto-close the mobile drawer whenever the route changes
+  useEffect(() => {
+    if (isMobile) onCloseMobile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
   async function fetchSessions() {
@@ -122,27 +174,111 @@ export function Sidebar({ onTimerClick }: { onTimerClick?: () => void }) {
   const pinnedSessions = sessions.filter((s) => s.is_pinned);
   const unpinnedSessions = sessions.filter((s) => !s.is_pinned);
 
-  return (
-    <aside style={{
-      width: "260px",
-      minWidth: "260px",
-      borderRight: `1px solid ${T.border}`,
-      display: "flex",
-      flexDirection: "column",
-      height: "100%",
-      background: T.bg,
-    }}>
-      {/* Logo */}
-      <div style={{
-        fontFamily: "'Geist', sans-serif",
-        fontWeight: 700,
-        fontSize: "1.1rem",
-        letterSpacing: "-0.02em",
-        padding: "20px 20px 16px",
-        borderBottom: `1px solid ${T.border}`,
-        color: T.text,
+  // ---- Desktop collapsed icon rail ----
+  if (collapsed && !isMobile) {
+    return (
+      <aside style={{
+        width: "64px",
+        minWidth: "64px",
+        borderRight: `1px solid ${T.border}`,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        height: "100%",
+        background: T.bg,
+        padding: "16px 0",
       }}>
-        Lumio
+        <button
+          onClick={onToggleCollapse}
+          title="Expand sidebar"
+          style={{
+            width: "36px", height: "36px", borderRadius: "10px",
+            background: "transparent", border: "none", color: T.textMuted,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            marginBottom: "20px",
+          }}
+        ><Icon name="chevronRight" /></button>
+
+        <button
+          onClick={handleNewChat}
+          title="New chat"
+          style={{
+            width: "36px", height: "36px", borderRadius: "10px",
+            background: T.text, border: "none", color: T.bg,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            marginBottom: "24px",
+          }}
+        ><Icon name="plus" /></button>
+
+        <button
+          onClick={onToggleCollapse}
+          title="Learn"
+          style={{
+            width: "36px", height: "36px", borderRadius: "10px",
+            background: "transparent", border: "none", color: T.textMuted,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            marginBottom: "10px",
+          }}
+        ><Icon name="book" /></button>
+
+        <Link href="/analytics" title="Analytics" style={{
+          width: "36px", height: "36px", borderRadius: "10px",
+          color: pathname === "/analytics" ? T.text : T.textMuted,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          marginBottom: "10px",
+        }}><Icon name="chart" /></Link>
+
+        {onTimerClick && (
+          <button
+            onClick={onTimerClick}
+            title="Timer"
+            style={{
+              width: "36px", height: "36px", borderRadius: "10px",
+              background: "transparent", border: "none", color: T.textMuted,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          ><Icon name="clock" /></button>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        <form action={signOut}>
+          <button type="submit" title="Sign out" style={{
+            width: "36px", height: "36px", borderRadius: "10px",
+            background: "transparent", border: "none", color: T.textMuted,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+          }}><Icon name="logout" /></button>
+        </form>
+      </aside>
+    );
+  }
+
+  const sidebarContent = (
+    <>
+      {/* Logo + collapse toggle */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "20px 16px 16px 20px",
+        borderBottom: `1px solid ${T.border}`,
+      }}>
+        <span style={{
+          fontFamily: "'Geist', sans-serif",
+          fontWeight: 700,
+          fontSize: "1.1rem",
+          letterSpacing: "-0.02em",
+          color: T.text,
+        }}>Lumio</span>
+        <button
+          onClick={isMobile ? onCloseMobile : onToggleCollapse}
+          title={isMobile ? "Close" : "Collapse sidebar"}
+          style={{
+            width: "30px", height: "30px", borderRadius: "8px",
+            background: "transparent", border: "none", color: T.textMuted,
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        ><Icon name={isMobile ? "chevronLeft" : "chevronLeft"} /></button>
       </div>
 
       {/* New Chat Button */}
@@ -405,6 +541,50 @@ export function Sidebar({ onTimerClick }: { onTimerClick?: () => void }) {
           }}>Sign Out</button>
         </form>
       </div>
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <>
+        {mobileOpen && (
+          <div
+            onClick={onCloseMobile}
+            style={{
+              position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+              zIndex: 90, backdropFilter: "blur(2px)",
+            }}
+          />
+        )}
+        <aside style={{
+          position: "fixed",
+          top: 0, left: 0, bottom: 0,
+          width: "280px",
+          zIndex: 100,
+          borderRight: `1px solid ${T.border}`,
+          display: "flex",
+          flexDirection: "column",
+          background: T.bg,
+          transform: mobileOpen ? "translateX(0)" : "translateX(-100%)",
+          transition: "transform 0.25s ease",
+        }}>
+          {sidebarContent}
+        </aside>
+      </>
+    );
+  }
+
+  return (
+    <aside style={{
+      width: "260px",
+      minWidth: "260px",
+      borderRight: `1px solid ${T.border}`,
+      display: "flex",
+      flexDirection: "column",
+      height: "100%",
+      background: T.bg,
+    }}>
+      {sidebarContent}
     </aside>
   );
 }

@@ -36,9 +36,21 @@ const T = {
   green: "#4ade80",
 };
 
+function PanelToggleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+const MOBILE_BREAKPOINT = 768;
+
 export default function SmartNotesPage() {
   const [loading, setLoading] = useState(false);
   const [fetchingNote, setFetchingNote] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Notes | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -54,6 +66,17 @@ export default function SmartNotesPage() {
 
   useEffect(() => { fetchHistory(); }, []);
   useEffect(() => { if (editingId) editInputRef.current?.focus(); }, [editingId]);
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+    setIsMobile(mql.matches);
+    setPanelOpen(!mql.matches);
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+      setPanelOpen(!e.matches);
+    };
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
 
   async function fetchHistory() {
     const res = await fetch("/api/smart-notes");
@@ -62,6 +85,7 @@ export default function SmartNotesPage() {
   }
 
   async function handleFile(file: File) {
+    if (isMobile) setPanelOpen(false);
     setLoading(true);
     setError(null);
     setNotes(null);
@@ -86,6 +110,7 @@ export default function SmartNotesPage() {
 
   async function handleHistoryClick(item: HistoryItem) {
     if (activeId === item.id) return;
+    if (isMobile) setPanelOpen(false);
     setFetchingNote(true);
     setError(null);
     setNotes(null);
@@ -149,26 +174,52 @@ export default function SmartNotesPage() {
   const unpinnedHistory = history.filter((h) => !h.is_pinned);
 
   return (
-    <div style={{ display: "flex", height: "100%", overflow: "hidden", background: T.bg }}>
+    <div style={{ display: "flex", height: "100%", overflow: "hidden", background: T.bg, position: "relative" }}>
+
+      {isMobile && panelOpen && (
+        <div
+          onClick={() => setPanelOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 40 }}
+        />
+      )}
 
       {/* Left panel */}
       <div style={{
-        width: "300px",
-        minWidth: "300px",
-        borderRight: `1px solid ${T.border}`,
+        width: isMobile ? "300px" : (panelOpen ? "300px" : "0px"),
+        minWidth: isMobile ? "300px" : (panelOpen ? "300px" : "0px"),
+        borderRight: (!isMobile && !panelOpen) ? "none" : `1px solid ${T.border}`,
+        overflow: (!isMobile && !panelOpen) ? "hidden" : "visible",
         display: "flex",
         flexDirection: "column",
         background: T.bg,
+        transition: isMobile ? undefined : "width 0.2s ease",
+        ...(isMobile ? {
+          position: "fixed" as const,
+          top: 0, bottom: 0, left: 0,
+          zIndex: 50,
+          transform: panelOpen ? "translateX(0)" : "translateX(-100%)",
+          transition: "transform 0.25s ease",
+        } : {}),
       }}>
-        <div style={{ padding: "24px 20px 16px", borderBottom: `1px solid ${T.border}` }}>
-          <div style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: "0.6rem",
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-            color: T.textMuted,
-            marginBottom: "6px",
-          }}>Learn</div>
+        <div style={{ padding: "24px 20px 16px", borderBottom: `1px solid ${T.border}`, minWidth: "300px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+            <div style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "0.6rem",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: T.textMuted,
+            }}>Learn</div>
+            <button
+              onClick={() => setPanelOpen(false)}
+              style={{
+                width: "26px", height: "26px", borderRadius: "6px",
+                background: "transparent", border: "none", color: T.textMuted,
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+              title="Collapse"
+            ><PanelToggleIcon /></button>
+          </div>
           <h1 style={{
             fontFamily: "'Geist', sans-serif",
             fontSize: "1.3rem",
@@ -325,7 +376,18 @@ export default function SmartNotesPage() {
       </div>
 
       {/* Right panel */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "32px 40px" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "16px 18px" : "32px 40px" }}>
+        {!panelOpen && (
+          <button
+            onClick={() => setPanelOpen(true)}
+            style={{
+              width: "34px", height: "34px", borderRadius: "8px",
+              background: T.surface, border: `1px solid ${T.border}`, color: T.text,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              marginBottom: "16px",
+            }}
+          ><PanelToggleIcon /></button>
+        )}
         {!notes && !isLoading && (
           <div style={{
             display: "flex",

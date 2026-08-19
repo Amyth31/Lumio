@@ -328,6 +328,10 @@ export default function FlashcardsLearnPage() {
       {/* Sidebar — history */}
       <div style={{
         ...styles.sidebar,
+        width: isMobile ? "260px" : (panelOpen ? "260px" : "0px"),
+        borderRight: (!isMobile && !panelOpen) ? "none" : `1px solid ${T.border}`,
+        overflow: (!isMobile && !panelOpen) ? "hidden" : "auto",
+        transition: isMobile ? undefined : "width 0.2s ease",
         ...(isMobile ? {
           position: "fixed" as const,
           top: 0, bottom: 0, left: 0,
@@ -337,17 +341,28 @@ export default function FlashcardsLearnPage() {
           transition: "transform 0.25s ease",
         } : {}),
       }}>
-        <h2
-          style={{
-            fontFamily: "'Geist', sans-serif",
-            fontSize: "1rem",
-            fontWeight: 700,
-            marginBottom: "16px",
-            color: T.text,
-          }}
-        >
-          Flashcard Sets
-        </h2>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", minWidth: "230px" }}>
+          <h2
+            style={{
+              fontFamily: "'Geist', sans-serif",
+              fontSize: "1rem",
+              fontWeight: 700,
+              color: T.text,
+              margin: 0,
+            }}
+          >
+            Flashcard Sets
+          </h2>
+          <button
+            onClick={() => setPanelOpen(false)}
+            style={{
+              width: "26px", height: "26px", borderRadius: "6px",
+              background: "transparent", border: "none", color: T.textMuted,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+            title="Collapse"
+          ><PanelToggleIcon /></button>
+        </div>
         <button
           onClick={resetToSetup}
           style={{
@@ -428,7 +443,7 @@ export default function FlashcardsLearnPage() {
 
       {/* Main panel */}
       <div style={{ ...styles.main, position: "relative", padding: isMobile ? "20px 16px" : styles.main.padding }}>
-        {isMobile && (
+        {!panelOpen && (
           <button
             onClick={() => setPanelOpen(true)}
             style={{

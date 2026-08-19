@@ -215,12 +215,14 @@ export default function YouTubeNotesPage() {
 
       {/* Left panel */}
       <div style={{
-        width: "300px",
-        minWidth: "300px",
-        borderRight: `1px solid ${T.border}`,
+        width: isMobile ? "300px" : (panelOpen ? "300px" : "0px"),
+        minWidth: isMobile ? "300px" : (panelOpen ? "300px" : "0px"),
+        borderRight: (!isMobile && !panelOpen) ? "none" : `1px solid ${T.border}`,
+        overflow: (!isMobile && !panelOpen) ? "hidden" : "visible",
         display: "flex",
         flexDirection: "column",
         background: T.bg,
+        transition: isMobile ? undefined : "width 0.2s ease",
         ...(isMobile ? {
           position: "fixed" as const,
           top: 0, bottom: 0, left: 0,
@@ -229,15 +231,25 @@ export default function YouTubeNotesPage() {
           transition: "transform 0.25s ease",
         } : {}),
       }}>
-        <div style={{ padding: "24px 20px 16px", borderBottom: `1px solid ${T.border}` }}>
-          <div style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: "0.6rem",
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-            color: T.textMuted,
-            marginBottom: "6px",
-          }}>Learn</div>
+        <div style={{ padding: "24px 20px 16px", borderBottom: `1px solid ${T.border}`, minWidth: "300px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+            <div style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "0.6rem",
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: T.textMuted,
+            }}>Learn</div>
+            <button
+              onClick={() => setPanelOpen(false)}
+              style={{
+                width: "26px", height: "26px", borderRadius: "6px",
+                background: "transparent", border: "none", color: T.textMuted,
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+              title="Collapse"
+            ><PanelToggleIcon /></button>
+          </div>
           <h1 style={{
             fontFamily: "'Geist', sans-serif",
             fontSize: "1.3rem",
@@ -383,7 +395,7 @@ export default function YouTubeNotesPage() {
 
       {/* Right panel */}
       <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "16px 18px" : "32px 40px" }}>
-        {isMobile && (
+        {!panelOpen && (
           <button
             onClick={() => setPanelOpen(true)}
             style={{

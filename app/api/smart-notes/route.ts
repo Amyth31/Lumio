@@ -106,7 +106,7 @@ CRITICAL FORMAT RULE: Respond with RAW JSON ONLY. No markdown. No backticks. Sta
         "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: "openai/gpt-oss-120b",
         max_tokens: 4096,
         messages: [
           { role: "system", content: systemPrompt },
